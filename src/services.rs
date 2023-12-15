@@ -1,13 +1,14 @@
 use actix_web::{
-    get, post,
-    web::{scope, Data, Json, Query, ServiceConfig},
+    delete, get, patch, post,
+    web::{scope, Data, Json, Path, Query, ServiceConfig},
     HttpResponse, Responder,
 };
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::{
     model::TaskModel,
-    schema::{CreateTaskSchema, FilterOptions},
+    schema::{CreateTaskSchema, FilterOptions, UpdateTaskSchema},
     AppState,
 };
 
@@ -24,7 +25,10 @@ pub fn config(conf: &mut ServiceConfig) {
     let scope = scope("/api")
         .service(health_checker)
         .service(create_task)
-        .service(list_tasks);
+        .service(list_tasks)
+        .service(delete_task)
+        .service(update_task)
+        .service(get_task_by_id);
     conf.service(scope);
 }
 
@@ -56,6 +60,54 @@ async fn create_task(body: Json<CreateTaskSchema>, context: Data<AppState>) -> i
     }
 }
 
+#[patch("/tasks/{id}")]
+async fn update_task(
+    path: Path<Uuid>,
+    body: Json<UpdateTaskSchema>,
+    context: Data<AppState>,
+) -> impl Responder {
+    let task_id = path.into_inner();
+    match sqlx::query_as!(TaskModel, "SELECT * FROM tasks WHERE id = $1", task_id)
+        .fetch_one(&context.db)
+        .await
+    {
+        Ok(task) => {
+            match sqlx::query_as!(
+                TaskModel,
+                "UPDATE tasks SET title = $1, content = $2 WHERE id = $3 RETURNING *",
+                body.title.to_owned().unwrap_or(task.title),
+                body.content.to_owned().unwrap_or(task.content),
+                task_id
+            )
+            .fetch_one(&context.db)
+            .await
+            {
+                Ok(task) => {
+                    let task_response = json!({
+                        "status": "success",
+                        "task": task
+                    });
+                    return HttpResponse::Ok().json(task_response);
+                }
+                Err(error) => {
+                    println!("Error updating task: {:?}", error);
+                    return HttpResponse::InternalServerError().json(json!({
+                        "status": "error",
+                        "message": format!("{:?}",error)
+                    }));
+                }
+            }
+        }
+        Err(error) => {
+            let message = format!("{:?}", error);
+            return HttpResponse::NotFound().json(json!({
+                "status": "error",
+                "message": message
+            }));
+        }
+    }
+}
+
 #[get("/tasks")]
 async fn list_tasks(
     filter_options: Query<FilterOptions>,
@@ -82,6 +134,49 @@ async fn list_tasks(
         }
         Err(error) => {
             println!("Error listing tasks: {:?}", error);
+            return HttpResponse::InternalServerError().json(json!({
+                "status": "error",
+                "message": format!("{:?}",error)
+            }));
+        }
+    }
+}
+
+#[get("/tasks/{id}")]
+async fn get_task_by_id(path: Path<Uuid>, context: Data<AppState>) -> impl Responder {
+    let task_id = path.into_inner();
+    match sqlx::query_as!(TaskModel, "SELECT * FROM tasks WHERE id = $1", task_id)
+        .fetch_one(&context.db)
+        .await
+    {
+        Ok(task) => {
+            let task_response = json!({
+                "status": "success",
+                "task": task
+            });
+            return HttpResponse::Ok().json(task_response);
+        }
+        Err(error) => {
+            println!("Error getting task: {:?}", error);
+            return HttpResponse::InternalServerError().json(json!({
+                "status": "error",
+                "message": format!("{:?}",error)
+            }));
+        }
+    }
+}
+#[delete("/tasks/{id}")]
+async fn delete_task(path: Path<Uuid>, context: Data<AppState>) -> impl Responder {
+    let task_id = path.into_inner();
+    match sqlx::query_as!(TaskModel, "DELETE FROM tasks WHERE id = $1", task_id)
+        .execute(&context.db)
+        .await
+    {
+        Ok(_) => {
+            return HttpResponse::NoContent().finish();
+        }
+        Err(error) => {
+            println!("Error getting task: {:?}", error);
             return HttpResponse::InternalServerError().json(json!({
                 "status": "error",
                 "message": format!("{:?}",error)

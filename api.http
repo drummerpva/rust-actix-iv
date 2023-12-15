@@ -7,5 +7,15 @@ Content-Type: application/json
 
 {"title":"Task 1","content":"Description 1"}
 ###
-GET {{url}}/api/tasks
+GET {{url}}/api/tasks?limit=2&offset=0
 ###
+@task_id = 216d0088-0a5c-4549-9abe-3cf3fc71704d
+###
+GET {{url}}/api/tasks/{{task_id}}
+###
+DELETE {{url}}/api/tasks/{{task_id}}
+###
+PATCH {{url}}/api/tasks/{{task_id}}
+Content-Type: application/json
+
+{"title":"Task Edited 2","content":"Description Edited 2"}
